@@ -1,3 +1,4 @@
+import ipaddress
 import os
 import subprocess
 import psutil
@@ -13,44 +14,114 @@ import getpass
 from tkinter import *
 import threading
 import sys
-from tkinter import Tk, PhotoImage, Label, Button
+from tkinter import Tk, PhotoImage, Label, Button, messagebox
 from pystray import Icon, MenuItem, Menu
-from PIL import Image, ImageDraw
+from PIL import Image
+import pefile
+import joblib
+import numpy as np
+
+model = joblib.load("malware_model.pkl")
+
+def extract_features(file_path):
+    try:
+        with open(file_path, "rb") as f:
+            pe = pefile.PE(data=f.read(), fast_load=True)
+        features = [
+            pe.FILE_HEADER.Machine,
+            pe.FILE_HEADER.NumberOfSections,
+            pe.FILE_HEADER.TimeDateStamp,
+            pe.FILE_HEADER.PointerToSymbolTable,
+            pe.FILE_HEADER.Characteristics,
+            pe.OPTIONAL_HEADER.MajorLinkerVersion,
+            pe.OPTIONAL_HEADER.SizeOfCode,
+            pe.OPTIONAL_HEADER.SizeOfImage,
+            pe.OPTIONAL_HEADER.SizeOfHeaders,
+            pe.OPTIONAL_HEADER.SizeOfInitializedData,
+            pe.OPTIONAL_HEADER.SizeOfUninitializedData,
+            pe.OPTIONAL_HEADER.SizeOfStackReserve,
+            pe.OPTIONAL_HEADER.SizeOfHeapReserve,
+        ]
+        return features
+    except Exception:
+        return None
 
 def virustotal(processPath):
-    api_key = 'key1'
-    upload_url = 'https://www.virustotal.com/vtapi/v2/file/scan'
-    report_url = 'https://www.virustotal.com/vtapi/v2/file/report'
+    API_KEY = 'API-KEY'
+    UPLOAD_URL = 'https://www.virustotal.com/vtapi/v2/file/scan'
+    REPORT_URL = 'https://www.virustotal.com/vtapi/v2/file/report'
 
-    append_text_to_display("Waiting Time: 15 Seconds")
-    time.sleep(15)
-    with open(processPath, 'rb') as file_to_scan:
-        files = {'file': (processPath, file_to_scan)}
-        params = {'apikey': api_key}
-        response = requests.post(upload_url, files=files, params=params)
-        upload_result = response.json()
-        scan_id = upload_result.get('scan_id')
-        append_text_to_display(f"VirusTotal File ({processPath}) submitted successfully")
+    WAIT_TIME_SUBMIT = 15
+    WAIT_TIME_REPORT = 40
+    POLLING_INTERVAL = 3
+    DETECTION_THRESHOLD = 7
+    MAX_RETRIES = 3
 
-    append_text_to_display("Waiting Time: 30 Seconds")
-    time.sleep(30)
-    params = {'apikey': api_key, 'resource': scan_id}
-    while True:
-        response = requests.get(report_url, params=params)
-        report_result = response.json()
-        if report_result.get('response_code') == 1:
-            positives = report_result.get('positives', 0)
-            total_engines = report_result.get('total', 0)
-            if total_engines > 0:
-                detection_ratio = (positives / total_engines) * 100
-                if detection_ratio > 50:
-                    return 'Unsafe'
-                else:
-                    return 'Safe'
+    append_text_to_display("Waiting Time: {} Seconds".format(WAIT_TIME_SUBMIT))
+    time.sleep(WAIT_TIME_SUBMIT)
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            with open(processPath, 'rb') as file_to_scan:
+                files = {'file': (processPath, file_to_scan)}
+                params = {'apikey': API_KEY}
+                response = requests.post(UPLOAD_URL, files=files, params=params)
+
+                response.raise_for_status()
+                upload_result = response.json()
+
+                if 'scan_id' not in upload_result:
+                    append_text_to_display("Error: No scan_id returned")
+                    return None
+
+                scan_id = upload_result['scan_id']
+                append_text_to_display(f"VirusTotal File ({processPath}) submitted successfully")
+                break
+        except Exception as e:
+            append_text_to_display(f"Error during file submission: {e}")
+            if attempt < MAX_RETRIES:
+                wait_time = random.uniform(1, 5)
+                append_text_to_display(f"Retrying upload in {wait_time:.2f} seconds...")
+                time.sleep(wait_time)
+            else:
+                return None
+
+    append_text_to_display("Waiting Time: {} Seconds".format(WAIT_TIME_REPORT))
+    time.sleep(WAIT_TIME_REPORT)
+
+    params = {'apikey': API_KEY, 'resource': scan_id}
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            response = requests.get(REPORT_URL, params=params)
+            response.raise_for_status()
+            report_result = response.json()
+
+            if report_result.get('response_code') == 1:
+                positives = report_result.get('positives', 0)
+                total_engines = report_result.get('total', 0)
+
+                if total_engines > 0:
+                    detection_ratio = (positives / total_engines) * 100
+                    if detection_ratio > DETECTION_THRESHOLD:
+                        return 'Unsafe'
+                    else:
+                        return 'Safe'
+            else:
+                append_text_to_display("Error: Report not ready yet")
+                append_text_to_display("Waiting Time: {} Seconds".format(POLLING_INTERVAL))
+                time.sleep(POLLING_INTERVAL)
+        except Exception as e:
+            append_text_to_display(f"Error during report retrieval: {e}")
+            if attempt < MAX_RETRIES:
+                wait_time = random.uniform(1, 5)
+                append_text_to_display(f"Retrying report fetch in {wait_time:.2f} seconds...")
+                time.sleep(wait_time)
+            else:
+                return None
 
 
 def gemini_scan(processName, processPath):
-    api_key = "key2"
+    api_key = "API-KEY"
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel("gemini-1.5-flash")
     response = model.generate_content(
@@ -62,7 +133,7 @@ def gemini_scan(processName, processPath):
 
 
 def gemini_about(processName, processPath):
-    api_key = "key3"
+    api_key = "API-KEY"
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel("gemini-1.5-flash")
     response = model.generate_content(
@@ -73,7 +144,6 @@ def gemini_about(processName, processPath):
     append_text_to_display("Waiting Time: 4 Seconds")
     time.sleep(4)
     return cleaned_text
-
 
 def format_memory(memory_bytes):
     if memory_bytes >= 1024 * 1024 * 1024:
@@ -162,12 +232,11 @@ def make_request_with_retry(url, retries=3):
         response = requests.get(url)
         if response.status_code == 429:
             delay = random.randint(1, 3)
-            print(f"Rate limit exceeded. Retrying in {delay} seconds...")
+            append_text_to_display(f"Rate limit exceeded. Retrying in {delay} seconds...")
             time.sleep(delay)
         else:
             return response
     raise Exception("Max retries exceeded")
-
 
 def get_serial_number():
     try:
@@ -184,7 +253,7 @@ def get_serial_number():
             hash = hashlib.md5(formatted_hostname.encode()).hexdigest()
             return hash
     except Exception as e:
-        print(f"Failed to retrieve serial number: {e}")
+        append_text_to_display(f"Failed to retrieve serial number: {e}")
 
 
 def i_am_online(id):
@@ -194,7 +263,7 @@ def i_am_online(id):
                 requests.get(f'https://samratsarkar.in/sentinelaiwatchdog/api/online.php?id={id}')
                 append_text_to_display(f"Online status sent for ID: {id}")
         except Exception as e:
-            print(f"Failed to send online status: {e}")
+            append_text_to_display(f"Failed to send online status: {e}")
         time.sleep(10)
 
 def PC_Online():
@@ -211,8 +280,7 @@ def PC_Online():
         append_text_to_display("User is already registered.")
     elif CheckID.text.strip() == "False":
         append_text_to_display("New user registered.")
-        RegisterID = requests.get(
-            f'https://samratsarkar.in/sentinelaiwatchdog/api/register.php?id={serial_number}&u={username}')
+        requests.get(f'https://samratsarkar.in/sentinelaiwatchdog/api/register.php?id={serial_number}&u={username}')
         with open("LOGIN_PASSWORD.txt", "w") as file:
             file.write(serial_number)
         append_text_to_display("User registration completed.")
@@ -231,30 +299,67 @@ def PC_Online():
         check_url = f'https://samratsarkar.in/sentinelaiwatchdog/api/check.php?id={serial_number}&pH={processSha256}'
 
         CheckReq = make_request_with_retry(check_url)
-
         if CheckReq.text.strip() == "True":
             append_text_to_display(f"Process '{processName}' exists in the online database.")
         elif CheckReq.text.strip() == "False":
-            append_text_to_display(f"New process '{processName}' is not in the online database. Adding to the online database.")
-
-            append_text_to_display("Gemini Scan API is called.")
-            response_text_1 = gemini_scan(processName, processPath)
-            append_text_to_display("Got Response from Gemini Scan API.")
-
-            append_text_to_display("Gemini About API is called.")
-            aboutProcess = gemini_about(processName, processPath)
-            append_text_to_display("Got Response from Gemini About API.")
-
-            final_response_text = response_text_1.replace(".", "").strip()
-
-            if final_response_text in ["Suspicious", "Unsafe", "Unknown"]:
-                append_text_to_display("VirusTotal API is called.")
-                final_response_text = virustotal(processPath)
-                append_text_to_display("Got Response from VirusTotal API.")
-
-            insert_url = f'https://samratsarkar.in/sentinelaiwatchdog/api/insert.php?a={aboutProcess}&id={serial_number}&pN={processName}&pS={final_response_text}&pP={processPath}&pH={processSha256}&pM={processMemory}&pT={processTime}'
-            make_request_with_retry(insert_url)
-            append_text_to_display(f"Process '{processName}' added to the online database with SHA-256 hash {processSha256}.")
+            append_text_to_display(f"New process '{processName}' Adding to the online database.")
+            features = extract_features(processPath)
+            if features is None:
+                append_text_to_display("Gemini Scan API is called.")
+                response_text_1 = gemini_scan(processName, processPath)
+                append_text_to_display("Got Response from Gemini Scan API.")
+                append_text_to_display("Gemini About API is called.")
+                aboutProcess = gemini_about(processName, processPath)
+                append_text_to_display("Got Response from Gemini About API.")
+                final_response_text = response_text_1.replace(".", "").replace(",", "").replace("*", "").strip()
+                if final_response_text in ["Suspicious", "Unsafe", "Unknown"]:
+                    append_text_to_display("VirusTotal API is called.")
+                    final_response_text = virustotal(processPath)
+                    append_text_to_display("Got Response from VirusTotal API.")
+                    final_response_text = final_response_text.replace(".", "").replace(",", "").replace("*", "").strip()
+                    insert_url = f'https://samratsarkar.in/sentinelaiwatchdog/api/insert.php?a={aboutProcess}&id={serial_number}&pN={processName}&pS={final_response_text}&pP={processPath}&pH={processSha256}&pM={processMemory}&pT={processTime}'
+                    make_request_with_retry(insert_url)
+                else:
+                    final_response_text = final_response_text.replace(".", "").replace(",", "").replace("*", "").strip()
+                    insert_url = f'https://samratsarkar.in/sentinelaiwatchdog/api/insert.php?a={aboutProcess}&id={serial_number}&pN={processName}&pS={final_response_text}&pP={processPath}&pH={processSha256}&pM={processMemory}&pT={processTime}'
+                    make_request_with_retry(insert_url)
+                append_text_to_display(f"Process '{processName}' added to the online database with SHA-256 hash {processSha256}.")
+            else:
+                append_text_to_display("Sentinel AI Watchdog Scan is called.")
+                features = np.array(features).reshape(1, -1)
+                probability = model.predict_proba(features)[0][1]
+                append_text_to_display(f"Process: '{processName}' | Score: {probability}.")
+                if probability > 0.60:
+                    response_text_1 = "Unsafe"
+                    append_text_to_display("Gemini About API is called.")
+                    aboutProcess = gemini_about(processName, processPath)
+                    append_text_to_display("Got Response from Gemini About API.")
+                    final_response_text = response_text_1.replace(".", "").replace(",", "").replace("*", "").strip()
+                    insert_url = f'https://samratsarkar.in/sentinelaiwatchdog/api/insert.php?a={aboutProcess}&id={serial_number}&pN={processName}&pS={final_response_text}&pP={processPath}&pH={processSha256}&pM={processMemory}&pT={processTime}'
+                    make_request_with_retry(insert_url)
+                    append_text_to_display(f"Process '{processName}' added to the online database with SHA-256 hash {processSha256}.")
+                else:
+                    append_text_to_display("Gemini Scan API is called.")
+                    response_text_1 = gemini_scan(processName, processPath)
+                    append_text_to_display("Got Response from Gemini Scan API.")
+                    append_text_to_display("Gemini About API is called.")
+                    aboutProcess = gemini_about(processName, processPath)
+                    append_text_to_display("Got Response from Gemini About API.")
+                    final_response_text = response_text_1.replace(".", "").replace(",", "").replace("*", "").strip()
+                    if final_response_text in ["Suspicious", "Unsafe", "Unknown"]:
+                        append_text_to_display("VirusTotal API is called.")
+                        final_response_text = virustotal(processPath)
+                        append_text_to_display("Got Response from VirusTotal API.")
+                        final_response_text = final_response_text.replace(".", "").replace(",", "").replace("*",
+                                                                                                            "").strip()
+                        insert_url = f'https://samratsarkar.in/sentinelaiwatchdog/api/insert.php?a={aboutProcess}&id={serial_number}&pN={processName}&pS={final_response_text}&pP={processPath}&pH={processSha256}&pM={processMemory}&pT={processTime}'
+                        make_request_with_retry(insert_url)
+                    else:
+                        final_response_text = final_response_text.replace(".", "").replace(",", "").replace("*",
+                                                                                                            "").strip()
+                        insert_url = f'https://samratsarkar.in/sentinelaiwatchdog/api/insert.php?a={aboutProcess}&id={serial_number}&pN={processName}&pS={final_response_text}&pP={processPath}&pH={processSha256}&pM={processMemory}&pT={processTime}'
+                        make_request_with_retry(insert_url)
+                    append_text_to_display(f"Process '{processName}' added to the online database with SHA-256 hash {processSha256}.")
     conn.close()
     add_new_processes_to_sqlite(db_path)
 
@@ -263,6 +368,126 @@ def PC_Offline():
     initialize_database(db_path)
     add_new_processes_to_sqlite(db_path)
     append_text_to_display("All running processes have been evaluated and added to the SQLite database.")
+
+def is_bogon_ip(ip: str) -> bool:
+    bogon_ranges = [
+        "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+        "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24", "192.168.0.0/16", "198.18.0.0/15",
+        "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4", "255.255.255.255/32",
+        "::/128", "::1/128", "::ffff:0:0/96", "100::/64", "2001:10::/28", "2001:db8::/32",
+        "fc00::/7", "fe80::/10", "ff00::/8"
+    ]
+
+    ip_obj = ipaddress.ip_address(ip)
+
+    for bogon in bogon_ranges:
+        if ip_obj in ipaddress.ip_network(bogon, strict=False):
+            return True
+
+    return False
+
+def gather_and_store_connections():
+    while True:
+        try:
+            result = subprocess.run(['netstat', '-ano'], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            netstat_output = result.stdout
+            established_connections = re.findall(r'TCP\s+\S+:(\d+)\s+(\S+):\d+\s+ESTABLISHED\s+(\d+)', netstat_output)
+            connections = []
+            for conn in established_connections:
+                remote_ip = conn[1]
+                if is_bogon_ip(remote_ip):
+                    continue
+                exe_name = get_executable_name(conn[2])
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                connections.append((remote_ip, exe_name, timestamp))
+
+            conn = sqlite3.connect('established_connections.db')
+            cursor = conn.cursor()
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS connections (
+                    ip TEXT,
+                    exe_name TEXT,
+                    timestamp TEXT,
+                    UNIQUE(ip, exe_name)  -- Ensure uniqueness based on ip and exe_name
+                )
+            ''')
+
+            for ip, exe_name, timestamp in connections:
+                try:
+                    cursor.execute('INSERT OR IGNORE INTO connections (ip, exe_name, timestamp) VALUES (?, ?, ?)',
+                                   (ip, exe_name, timestamp))
+                except Exception as e:
+                    print(f"Error inserting into database: {str(e)}")
+
+            conn.commit()
+            conn.close()
+            add_ip_to_db(serial_number)
+        except Exception as e:
+            print(f"Error gathering connections: {str(e)}")
+        append_text_to_display("Waiting Time: 5 Seconds")
+        time.sleep(5)
+
+def get_executable_name(pid):
+    try:
+        ps_command = f"(Get-Process -Id {pid}).ProcessName"
+        result = subprocess.run(
+            ['powershell', '-Command', ps_command],
+            capture_output=True,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        exe_name = result.stdout.strip()
+        if exe_name:
+            return exe_name + ".exe"
+        else:
+            print(f"Warning: No name found for PID {pid}. PowerShell output: {result.stdout.strip()}")
+
+        tasklist_result = subprocess.run(
+            ['tasklist', '/FI', f'PID eq {pid}'],
+            capture_output=True, text=True,creationflags=subprocess.CREATE_NO_WINDOW)
+        match = re.search(r'(\S+\.exe)', tasklist_result.stdout)
+        if match:
+            exe_name = match.group(1)
+            print(f"Fallback: Using tasklist for PID {pid}, found exe_name: {exe_name}")
+            return exe_name
+    except Exception as e:
+        print(f"Error fetching executable name for PID {pid}: {str(e)}")
+
+    return None
+
+def add_ip_to_db(serial_number):
+    if check_internet():
+        conn = sqlite3.connect('established_connections.db')
+        cursor = conn.cursor()
+        try:
+            cursor.execute('SELECT DISTINCT ip, exe_name, timestamp FROM connections')
+            rows = cursor.fetchall()
+
+            for ip, exe_name, timestamp in rows:
+                check_ip_exist = f'https://samratsarkar.in/sentinelaiwatchdog/api/ip_exist.php?id={serial_number}&Ip={ip}&exe={exe_name}'
+                check_req = make_request_with_retry(check_ip_exist)
+
+                if not check_req:
+                    append_text_to_display(f"Failed to check IP '{ip}' in online database.")
+                    continue
+
+                if check_req.text.strip() == "True":
+                    append_text_to_display(f"IP '{ip}' exists in the online database.")
+                elif check_req.text.strip() == "False":
+                    append_text_to_display(f"New IP '{ip}' is not in the online database. Adding it.")
+
+                    insert_ip_to_db = (
+                        f'https://samratsarkar.in/sentinelaiwatchdog/api/insert_ip.php'
+                        f'?id={serial_number}&Ip={ip}&exe={exe_name}&t={timestamp}'
+                    )
+
+                    make_request_with_retry(insert_ip_to_db)
+                    append_text_to_display(f"New IP '{ip}' has been added to the online database.")
+
+        except sqlite3.Error as e:
+            append_text_to_display(f"Database error: {str(e)}")
+        finally:
+            conn.close()
 
 def background_loop(serial_number):
     count = 0
@@ -275,12 +500,12 @@ def background_loop(serial_number):
             else:
                 append_text_to_display("PC is Offline..........")
                 PC_Offline()
-            append_text_to_display(f"-------------Iteration Count:({count})-------------")
+            append_text_to_display(f"Iteration Count:({count})")
             if count == 5:
                 clear_text_box()
                 count = 0
         except Exception as e:
-            print(f"An error occurred: {e}")
+            append_text_to_display(f"An error occurred: {e}")
             try:
                 requests.get(f'https://samratsarkar.in/sentinelaiwatchdog/api/logs.php?id={serial_number}&l={e}')
             except Exception as log_error:
@@ -316,6 +541,17 @@ def clear_text_box():
     text_box.delete(1.0, END)
     text_box.config(state=DISABLED)
 
+def hide_window():
+    Tkt.withdraw()
+    icon.visible = True
+
+def show_window(icon, item):
+    Tkt.deiconify()
+    icon.visible = False
+
+def on_exit(icon, item):
+    stop_program()
+
 def Home():
     global bg, text_box
     bg = PhotoImage(file=resource_path("bg.png"))
@@ -350,8 +586,7 @@ def Home():
     scrollbar = Scrollbar(text_box_frame)
     scrollbar.pack(side=RIGHT, fill=Y)
 
-    text_box = Text(text_box_frame, wrap=WORD, yscrollcommand=scrollbar.set,
-                    bg='black', fg='lime', font=('Arial', 12))
+    text_box = Text(text_box_frame, wrap=WORD, yscrollcommand=scrollbar.set, bg='black', fg='lime', font=('Arial', 10))
     text_box.pack(side=LEFT, fill=BOTH, expand=True)
     scrollbar.config(command=text_box.yview)
     text_box.config(state=DISABLED)
@@ -364,29 +599,21 @@ def Home():
 
     Tkt.mainloop()
 
-def hide_window():
-    Tkt.withdraw()
-    icon.visible = True
-
-def show_window(icon, item):
-    Tkt.deiconify()
-    icon.visible = False
-
-def on_exit(icon, item):
-    stop_program()
-
 if __name__ == "__main__":
     StartTK()
+
     icon_path = resource_path("icon.ico")
     icon_image = Image.open(icon_path)
-
     icon = Icon("SentinelAI Watchdog", icon_image, "SentinelAI Watchdog", menu=Menu(
         MenuItem("Show", show_window),
         MenuItem("Exit", on_exit)
     ))
 
     threading.Thread(target=icon.run, daemon=True).start()
+
+    threading.Thread(target=gather_and_store_connections, daemon=True).start()
     serial_number = get_serial_number()
     threading.Thread(target=i_am_online, args=(serial_number,), daemon=True).start()
+
     Home()
 
