@@ -60,16 +60,6 @@ pip install psutil requests google-generativeai pystray pillow pefile joblib num
 - System Resource Tracking
 - Threat Intelligence
 
-## 🖼️ Screenshots
-### Classification Metrics
-![Classification Metrics](https://samrat-sarkar.github.io/SentinelAI-Watchdog/classification_metrics.png)
-
-### Confusion Matrix
-![Confusion Matrix](https://samrat-sarkar.github.io/SentinelAI-Watchdog/confusion_matrix.png)
-
-### Dataset Distribution
-![Dataset Distribution](https://samrat-sarkar.github.io/SentinelAI-Watchdog/dataset_distribution.png)
-
 ## 🛠️ Technical Details
 - Built with Python and Machine Learning
 - Uses Random Forest Classifier
