@@ -84,7 +84,7 @@ This will:
 - Save the trained model
 
 ## ⚠️ Important Notes
-- Keep VirusTotal API key secure
+- Keep API key secure
 - Regular model updates recommended
 - Monitor system resources
 - Use alongside other security measures
