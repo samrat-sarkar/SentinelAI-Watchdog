@@ -18,7 +18,8 @@ SentinelAI-Watchdog is an advanced AI-powered system monitoring and malware dete
 ### 📥 Prerequisites
 - Python 3.x
 - pip (Python package manager)
-- VirusTotal API Key (optional)
+- VirusTotal API Key 
+- Gemini API Key 
 
 ### ⚙️ Required Packages
 ```bash
@@ -36,8 +37,11 @@ pip install psutil requests google-generativeai pystray pillow pefile joblib num
    cd SentinelAI-Watchdog
    ```
 
-3. Configure VirusTotal API (optional):
+3. Configure VirusTotal API:
    - Replace 'API-KEY' in main.py with your VirusTotal API key
+
+4. Configure Gemini API:
+   - Replace 'API-KEY' in main.py with your Gemini API key
 
 ## 💻 Usage
 
